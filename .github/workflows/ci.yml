@@ -1,0 +1,104 @@
+name: CI
+
+on:
+  push:
+    branches: [main, "feature/**"]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  lint-and-test:
+    name: lint + format + test (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: Install agent-room (with dev extras)
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Ruff lint
+        run: ruff check agent_room/ tests/ examples/
+
+      - name: Ruff format check
+        run: ruff format --check agent_room/ tests/ examples/
+
+      - name: Pytest
+        run: pytest -q
+
+      - name: Coverage report (Python 3.13 only)
+        # Coverage runs on a single Python to keep CI under 2 minutes;
+        # the threshold is enforced by `fail_under = 90` in pyproject.toml.
+        if: matrix.python-version == '3.13'
+        run: |
+          pytest -q --cov=agent_room \
+            --cov-report=term-missing \
+            --cov-report=xml:coverage.xml \
+            --cov-report=html:htmlcov
+
+      - name: Upload coverage artifact
+        if: matrix.python-version == '3.13'
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: |
+            coverage.xml
+            htmlcov/
+          retention-days: 14
+
+  independence:
+    name: independence (no hermes-agent imports / deps)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Source-level grep — no `from hermes_` / `import hermes_`
+        run: |
+          if grep -RnE "from hermes_|import hermes_" agent_room/ tests/ examples/; then
+            echo "::error::agent-room must not import from hermes_*. See ADR-0007."
+            exit 1
+          fi
+
+      - name: pyproject.toml — no hermes-agent dependency
+        run: |
+          if grep -nE "hermes[-_]agent" pyproject.toml; then
+            echo "::error::pyproject.toml references hermes-agent. See ADR-0007."
+            exit 1
+          fi
+
+      - name: Set up Python (for offline pytest run)
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install + run tests in clean environment
+        # The CI runner has no hermes-agent on disk; passing pytest here is
+        # equivalent to ADR-0007's `rm -rf hermes-agent && pytest -q` rule.
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+          pytest -q
+
+      - name: Runtime independence — block hermes_* and force-import every submodule
+        # Belt-and-suspenders for the source-grep above: catches lazy imports,
+        # importlib.import_module of computed names, and re-exports the static
+        # check can't see. See tests/test_independence.py + ADR-0007 §"验证".
+        run: pytest -q tests/test_independence.py

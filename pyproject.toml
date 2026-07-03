@@ -1,0 +1,183 @@
+[project]
+name = "agent-room"
+version = "0.1.0"
+description = "Multi-role LLM workflow orchestrator powered by LangGraph"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "agent-room contributors" }]
+
+dependencies = [
+    "langgraph>=0.2.50",
+    "langgraph-checkpoint-sqlite>=2.0.1",
+    "langchain-core>=0.3.20",
+    "langchain-anthropic>=0.3.0",
+    "langchain-openai>=0.2.10",
+    "pydantic>=2.9",
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.32",
+    "sse-starlette>=2.1",
+    "typer>=0.13",
+    "rich>=13.9",
+    "python-dotenv>=1.0",
+    "aiosqlite>=0.20",
+    "pyyaml>=6.0",
+    "jinja2>=3.1",
+    "tiktoken>=0.8",
+    "opentelemetry-api>=1.27",
+    "opentelemetry-sdk>=1.27",
+    "structlog>=24.1",
+]
+
+[project.optional-dependencies]
+mcp = [
+    "mcp>=1.0",
+    "langchain-mcp-adapters>=0.3",
+]
+vector = [
+    "qdrant-client>=1.9",
+    "fastembed>=0.3",
+]
+dev = [
+    "pytest>=8.3",
+    "pytest-asyncio>=0.24",
+    "pytest-cov>=5.0",
+    "coverage>=7.6",
+    "ruff>=0.7",
+    "mypy>=1.13",
+    "httpx>=0.27",
+    "asgi-lifespan>=2.1",
+    "mcp>=1.0",
+    "langchain-mcp-adapters>=0.3",
+]
+
+[project.scripts]
+agent-room = "agent_room.cli:app"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["agent_room"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"agent_room/server/ui/templates" = "agent_room/server/ui/templates"
+"agent_room/server/ui/static" = "agent_room/server/ui/static"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = [
+    "E",    # pycodestyle errors
+    "F",    # pyflakes
+    "W",    # pycodestyle warnings
+    "I",    # isort
+    "UP",   # pyupgrade
+    "B",    # flake8-bugbear
+    "SIM",  # flake8-simplify
+]
+ignore = [
+    "E501",  # line too long — formatter handles wrapping
+    "B008",  # function call in default arg — fastapi/typer pattern
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**.py" = ["B011"]   # asserts in tests are fine
+"examples/**.py" = ["E402"]  # late imports for setup-then-import demo style
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+# Only collect the real suite; `examples/dev_runs_tests.py` seeds throwaway
+# `test_calc.py` files under snapshots/ that otherwise clash during collection.
+testpaths = ["tests"]
+# tests/integration/ needs real network (HF Hub model downloads) and/or a real
+# Qdrant server — excluded from the default zero-network run (CLAUDE.md §5.1).
+# Invoke explicitly: `pytest tests/integration -q`.
+norecursedirs = ["tests/integration"]
+
+[tool.coverage.run]
+source = ["agent_room"]
+branch = false
+parallel = false
+
+[tool.coverage.report]
+# Floor set from the v0.5 baseline (336 tests, 1918 stmts, 93% covered).
+# Lowered to 90 to leave headroom for future modules; bump back up once
+# coverage stabilises again.
+fail_under = 90
+show_missing = true
+skip_covered = false
+exclude_also = [
+    "if TYPE_CHECKING:",
+    "raise NotImplementedError",
+    "@(abc\\.)?abstractmethod",
+    "pragma: no cover",
+]
+
+[tool.coverage.html]
+directory = "htmlcov"
+
+[tool.coverage.xml]
+output = "coverage.xml"
+
+[tool.mypy]
+# Checked syntax level for mypy's own stub/typeshed resolution — NOT the
+# runtime constraint (`requires-python = ">=3.11"` above is what's enforced
+# at install time; our source still only needs 3.11). Bumped from 3.11
+# because numpy>=2.x (a transitive dep of the optional `[vector]` extra —
+# qdrant-client/fastembed) ships `.pyi` stubs using PEP 695 `type X = ...`
+# syntax that mypy 2.x's stub parser only accepts under `python_version >=
+# 3.12`, regardless of `follow_imports`/`ignore_missing_imports` settings on
+# the importing module (stub files are always parsed once reachable).
+python_version = "3.12"
+strict = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+disallow_untyped_decorators = false
+ignore_missing_imports = true
+exclude = ["^(tests|examples|benchmarks|scripts)/"]
+
+# LangGraph / LangChain 边界：第三方 stub 严签与运行时 dict 用法不一致，
+# 我们用法在文档/教程里反复出现且行为正确。这些错误码是 stub 严格度问题，
+# 不是产品代码 bug —— 在边界文件里关掉，其余代码仍走 strict。
+[[tool.mypy.overrides]]
+module = ["agent_room.graph", "agent_room.service", "agent_room.config"]
+disable_error_code = ["arg-type", "call-overload", "call-arg"]
+
+# LangChain BaseTool 是 Pydantic v2 模型，子类用 `name = "..."` 是字段赋值；
+# stub 在 `BaseTool` 上声明 `name: str` 为实例变量，mypy 误把子类赋值当成
+# class-var override。整批工具子类豁免 [misc]。
+[[tool.mypy.overrides]]
+module = [
+    "agent_room.tools.fs",
+    "agent_room.tools.shell",
+    "agent_room.memory.tool",
+]
+disable_error_code = ["misc"]
+
+# aiosqlite.Connection has no public API for loading a SQLite extension
+# (enable_load_extension/load_extension) — `sqlite-vec` requires it. Dropping
+# to the private `_execute`/`_conn` is aiosqlite's own recommended workaround
+# for extension loading; `_execute` just isn't typed. Boundary issue, not a
+# product-code bug — see agent_room/memory/vector.py.
+[[tool.mypy.overrides]]
+module = ["agent_room.memory.vector"]
+disable_error_code = ["no-untyped-call"]
+
+# `sqlite_vec`, `fastembed`, and `qdrant_client` all transitively reach numpy
+# (sqlite_vec's optional `register_numpy` helper; fastembed/qdrant-client use
+# numpy arrays throughout). Once the optional `[vector]` extra is installed,
+# numpy comes along, and numpy 2.x's own .pyi stubs use PEP 695 `type X = ...`
+# syntax that mypy only parses under `python_version >= 3.12`.
+# `ignore_missing_imports` doesn't help since these packages *are* installed
+# with real stubs; skip following their imports entirely so mypy never has
+# to reach numpy. `agent_room/memory/{vector,qdrant_index,fastembed_backend}.py`
+# already type these libraries' objects as `Any` at the boundary — same
+# spirit as the LangGraph/LangChain overrides above.
+[[tool.mypy.overrides]]
+module = ["sqlite_vec", "fastembed", "fastembed.*", "qdrant_client", "qdrant_client.*"]
+follow_imports = "skip"
+

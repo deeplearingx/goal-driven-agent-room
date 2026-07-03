@@ -1,0 +1,11 @@
+# Single-developer "direct answer" pipeline. No review loop.
+# Useful for tasks where structured review is overkill (one-off scripts,
+# prototyping, throwaway code).
+name: solo
+entry: developer
+nodes:
+  developer:
+    role: developer
+    extra_context_keys: [title, description]
+edges:
+  - { from: developer, to: __end__ }

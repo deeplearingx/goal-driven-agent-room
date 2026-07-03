@@ -1,0 +1,35 @@
+# Planner-gate variant of the full pipeline (F2 escalation experiment, option A).
+#
+# The planner is asked for `{plan, open_questions}` via structured output;
+# non-empty `open_questions` parks the run at `awaiting_user` BEFORE the
+# developer writes any code. Resume sends the user's answer in via
+# `service.resume(...)`, exactly the same way as the legacy reviewer-driven
+# escalation path — see [docs/findings/2026-06-11-smoke-v0.1.md] §F2.
+#
+# The reviewer here is the v0.1 single-call reviewer (the gate already did
+# the "is this fully specified?" work upstream).
+name: planner_gate
+entry: planner
+nodes:
+  planner:
+    role: planner
+    variant: gate
+  developer:
+    role: developer
+  reviewer:
+    role: reviewer
+  delivery:
+    role: delivery
+edges:
+  - from: planner
+    router: agent_room.routers:planner_gate_router
+    branches:
+      - { "on": developer, to: developer }
+      - { "on": halt, to: __end__ }
+  - { from: developer, to: reviewer }
+  - from: reviewer
+    branches:
+      - { "on": developer, to: developer }
+      - { "on": delivery, to: delivery }
+      - { "on": halt, to: __end__ }
+  - { from: delivery, to: __end__ }

@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block title %}agent-room — {{ task_id }}{% endblock %}
+{% block body %}
+<section class="card">
+  <div class="row" style="justify-content:space-between">
+    <div class="col" style="gap:2px">
+      <span style="color:var(--muted); font-size:12px">task</span>
+      <code>{{ task_id }}</code>
+    </div>
+    <div class="col" style="align-items:flex-end; gap:2px">
+      <span style="color:var(--muted); font-size:12px">status</span>
+      <span id="status" class="pill">…</span>
+    </div>
+  </div>
+</section>
+
+<section class="card" id="resume-card" hidden>
+  <h2 style="margin-top:0">Reviewer needs your decision</h2>
+  <p id="resume-feedback" style="color:var(--muted)"></p>
+  <form id="resume-form" class="col">
+    <textarea id="decision" name="decision" placeholder="Pick option A: keep recursion." required></textarea>
+    <div class="row" style="justify-content:flex-end">
+      <button type="submit">Resume</button>
+    </div>
+  </form>
+</section>
+
+<section class="card">
+  <h2 style="margin-top:0">Live events</h2>
+  <div class="events" id="events"></div>
+</section>
+
+<section class="card" id="delivery-card" hidden>
+  <h2 style="margin-top:0">Delivery</h2>
+  <pre id="delivery"></pre>
+</section>
+<script>window.AGENT_ROOM_PAGE = "task"; window.AGENT_ROOM_TASK_ID = "{{ task_id }}";</script>
+{% endblock %}

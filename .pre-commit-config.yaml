@@ -1,0 +1,15 @@
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.7.4
+    hooks:
+      - id: ruff
+        args: [--fix]
+      - id: ruff-format
+
+  - repo: local
+    hooks:
+      - id: agent-room-independence
+        name: agent-room must not import hermes-agent
+        entry: bash -c '! grep -RnE "from hermes_|import hermes_" agent_room/ tests/ examples/'
+        language: system
+        pass_filenames: false
