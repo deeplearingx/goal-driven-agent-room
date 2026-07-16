@@ -1,0 +1,28 @@
+# Two-call reviewer variant of the full pipeline (F2 escalation experiment, option B).
+#
+# The reviewer makes a cheap `FocusCheck` call first ("is this fully
+# specified?"); under-specified tasks escalate to `need_user_decision` and
+# skip the heavy review call. Fully-specified tasks get the original
+# review and route normally — see
+# [docs/findings/2026-06-11-smoke-v0.1.md] §F2.
+name: two_call_review
+entry: planner
+nodes:
+  planner:
+    role: planner
+  developer:
+    role: developer
+  reviewer:
+    role: reviewer
+    variant: two_call
+  delivery:
+    role: delivery
+edges:
+  - { from: planner, to: developer }
+  - { from: developer, to: reviewer }
+  - from: reviewer
+    branches:
+      - { "on": developer, to: developer }
+      - { "on": delivery, to: delivery }
+      - { "on": halt, to: __end__ }
+  - { from: delivery, to: __end__ }

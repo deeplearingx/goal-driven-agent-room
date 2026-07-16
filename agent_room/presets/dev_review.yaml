@@ -1,0 +1,20 @@
+# Two-role developer ↔ reviewer loop. No planner, no delivery node.
+# Useful for fast iteration on small code-edit tasks where you don't need
+# a separate plan or a packaged handoff document.
+#
+# Note: in this preset there is no `delivery` node, so when reviewer returns
+# `approved` (router signal "delivery") the run terminates directly.
+name: dev_review
+entry: developer
+nodes:
+  developer:
+    role: developer
+  reviewer:
+    role: reviewer
+edges:
+  - { from: developer, to: reviewer }
+  - from: reviewer
+    branches:
+      - { "on": developer, to: developer }
+      - { "on": delivery, to: __end__ }
+      - { "on": halt, to: __end__ }

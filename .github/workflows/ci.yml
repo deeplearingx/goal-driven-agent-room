@@ -1,0 +1,215 @@
+name: CI
+
+on:
+  push:
+    branches: [main, "feature/**"]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  lint-and-test:
+    name: lint + format + test (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: Install agent-room (with dev extras)
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev,worker]"
+
+      - name: Ruff lint
+        run: ruff check agent_room/ tests/ examples/
+
+      - name: Ruff format check
+        run: ruff format --check agent_room/ tests/ examples/
+
+      - name: Pytest
+        run: pytest -q
+
+      - name: Coverage report (Python 3.13 only)
+        # Coverage runs on a single Python to keep CI under 2 minutes;
+        # the threshold is enforced by `fail_under = 90` in pyproject.toml.
+        if: matrix.python-version == '3.13'
+        run: |
+          pytest -q --cov=agent_room \
+            --cov-report=term-missing \
+            --cov-report=xml:coverage.xml \
+            --cov-report=html:htmlcov
+
+      - name: Upload coverage artifact
+        if: matrix.python-version == '3.13'
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: |
+            coverage.xml
+            htmlcov/
+          retention-days: 14
+
+  independence:
+    name: independence (no hermes-agent imports / deps)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Source-level grep — no `from hermes_` / `import hermes_`
+        run: |
+          if grep -RnE "from hermes_|import hermes_" agent_room/ tests/ examples/; then
+            echo "::error::agent-room must not import from hermes_*. See ADR-0007."
+            exit 1
+          fi
+
+      - name: pyproject.toml — no hermes-agent dependency
+        run: |
+          if grep -nE "hermes[-_]agent" pyproject.toml; then
+            echo "::error::pyproject.toml references hermes-agent. See ADR-0007."
+            exit 1
+          fi
+
+      - name: Set up Python (for offline pytest run)
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install + run tests in clean environment
+        # The CI runner has no hermes-agent on disk; passing pytest here is
+        # equivalent to ADR-0007's `rm -rf hermes-agent && pytest -q` rule.
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev,worker]"
+          pytest -q
+
+      - name: Runtime independence — block hermes_* and force-import every submodule
+        # Belt-and-suspenders for the source-grep above: catches lazy imports,
+        # importlib.import_module of computed names, and re-exports the static
+        # check can't see. See tests/test_independence.py + ADR-0007 §"验证".
+        run: pytest -q tests/test_independence.py
+
+  gateway:
+    name: Go gateway
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: gateway
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25.x"
+          cache-dependency-path: gateway/go.sum
+      - run: go vet ./...
+      - run: go test ./...
+      - run: GOARCH=amd64 go test -tags=eino ./cmd/eino-worker ./internal/runtime -run '^$'
+      - name: Build kbctl release binaries
+        run: |
+          mkdir -p dist
+          GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o dist/kbctl-linux-amd64 ./cmd/kbctl
+          GOOS=windows GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o dist/kbctl-windows-amd64.exe ./cmd/kbctl
+      - name: Upload kbctl binaries
+        uses: actions/upload-artifact@v4
+        with:
+          name: kbctl
+          path: gateway/dist/kbctl-*
+          retention-days: 14
+
+  frontend:
+    name: React console
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: mulit_agent_web_ui
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: mulit_agent_web_ui/package-lock.json
+      - run: npm ci
+      - run: npm run test -- --run
+      - run: npm run build
+
+  container-build:
+    name: Container build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - run: docker build -f gateway/Dockerfile -t agent-room-gateway:ci .
+      - run: docker build -f gateway/Dockerfile.eino-worker -t agent-room-eino-worker:ci .
+      - run: docker build -f gateway/Dockerfile.knowledge-worker -t agent-room-knowledge-worker:ci .
+      - run: docker build -f gateway/Dockerfile.webhook-worker -t agent-room-webhook-worker:ci .
+      - run: docker build -f gateway/Dockerfile.sandbox-runner -t agent-room-sandbox-runner:ci .
+      - run: docker build -f Dockerfile.worker -t agent-room-worker:ci .
+      - name: Scan Gateway image for high or critical vulnerabilities
+        # Pinned commit: avoid mutable action tags in the supply chain.
+        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # v0.35.0
+        with:
+          image-ref: agent-room-gateway:ci
+          format: table
+          exit-code: '1'
+          ignore-unfixed: true
+          severity: CRITICAL,HIGH
+      - name: Scan Python Worker image for high or critical vulnerabilities
+        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # v0.35.0
+        with:
+          image-ref: agent-room-worker:ci
+          format: table
+          exit-code: '1'
+          ignore-unfixed: true
+          severity: CRITICAL,HIGH
+      - name: Scan Eino Worker image for high or critical vulnerabilities
+        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # v0.35.0
+        with:
+          image-ref: agent-room-eino-worker:ci
+          format: table
+          exit-code: '1'
+          ignore-unfixed: true
+          severity: CRITICAL,HIGH
+      - name: Scan Knowledge Worker image for high or critical vulnerabilities
+        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # v0.35.0
+        with:
+          image-ref: agent-room-knowledge-worker:ci
+          format: table
+          exit-code: '1'
+          ignore-unfixed: true
+          severity: CRITICAL,HIGH
+      - name: Scan Webhook Worker image for high or critical vulnerabilities
+        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # v0.35.0
+        with:
+          image-ref: agent-room-webhook-worker:ci
+          format: table
+          exit-code: '1'
+          ignore-unfixed: true
+          severity: CRITICAL,HIGH
+      - name: Scan Sandbox Runner image for high or critical vulnerabilities
+        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # v0.35.0
+        with:
+          image-ref: agent-room-sandbox-runner:ci
+          format: table
+          exit-code: '1'
+          ignore-unfixed: true
+          severity: CRITICAL,HIGH
+      - name: Generate Gateway SBOM
+        uses: anchore/sbom-action@v0
+        with:
+          image: agent-room-gateway:ci
+          artifact-name: gateway-sbom

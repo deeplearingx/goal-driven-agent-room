@@ -1,0 +1,80 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: agent-room-worker
+  namespace: agent-room
+spec:
+  replicas: 2
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 1
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: agent-room-worker
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: agent-room-worker
+    spec:
+      terminationGracePeriodSeconds: 660
+      containers:
+        - name: worker
+          image: ghcr.io/your-org/agent-room-worker:REPLACE_WITH_IMMUTABLE_TAG
+          envFrom:
+            - configMapRef: { name: agent-room-config }
+            - secretRef: { name: agent-room-secrets }
+          resources:
+            requests: { cpu: 500m, memory: 1Gi }
+            limits: { cpu: "2", memory: 2Gi }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+          volumeMounts:
+            - { name: workspace, mountPath: /data/workspace }
+            - { name: tmp, mountPath: /tmp }
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile: { type: RuntimeDefault }
+      volumes:
+        # Pod-local by default: another worker cannot inspect this pod's files.
+        # Replace with a tenant-safe artifact service for cross-pod persistence.
+        - { name: workspace, emptyDir: { sizeLimit: 2Gi } }
+        - { name: tmp, emptyDir: { sizeLimit: 256Mi } }
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: agent-room-worker
+  namespace: agent-room
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: agent-room-worker
+---
+# Requires KEDA to be installed in the cluster. Queue depth is a better signal
+# for model workers than CPU, because slow upstream model calls create backlog.
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: agent-room-worker
+  namespace: agent-room
+spec:
+  scaleTargetRef:
+    name: agent-room-worker
+  pollingInterval: 15
+  cooldownPeriod: 300
+  minReplicaCount: 2
+  maxReplicaCount: 50
+  triggers:
+    - type: rabbitmq
+      metadata:
+        protocol: auto
+        queueName: agent-room.jobs
+        mode: QueueLength
+        value: "20"
+        activationValue: "1"
+        hostFromEnv: RABBITMQ_URL

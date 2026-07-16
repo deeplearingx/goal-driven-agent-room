@@ -1,0 +1,192 @@
+name: agent-room
+
+services:
+  postgres:
+    # pgvector keeps the baseline retrieval stack inside PostgreSQL; override
+    # POSTGRES_IMAGE only with an image that includes the vector extension.
+    image: ${POSTGRES_IMAGE:-pgvector/pgvector:pg17}
+    environment:
+      POSTGRES_DB: agent_room
+      POSTGRES_USER: agent_room
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-local-agent-room}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U agent_room -d agent_room"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  rabbitmq:
+    image: rabbitmq:4.3.2-management-alpine
+    environment:
+      RABBITMQ_DEFAULT_USER: agent_room
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:-local-agent-room}
+    ports:
+      - "127.0.0.1:15672:15672"
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+
+  redis:
+    image: redis:7.4-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  migrate:
+    build:
+      context: .
+      dockerfile: gateway/Dockerfile
+    environment:
+      DATABASE_URL: postgresql://agent_room:${POSTGRES_PASSWORD:-local-agent-room}@postgres:5432/agent_room
+      RABBITMQ_URL: amqp://agent_room:${RABBITMQ_PASSWORD:-local-agent-room}@rabbitmq:5672/
+      GATEWAY_AUTO_MIGRATE: "true"
+      GATEWAY_MIGRATE_ONLY: "true"
+    depends_on:
+      postgres: { condition: service_healthy }
+    restart: "no"
+
+  gateway:
+    build:
+      context: .
+      dockerfile: gateway/Dockerfile
+    environment:
+      DATABASE_URL: postgresql://agent_room:${POSTGRES_PASSWORD:-local-agent-room}@postgres:5432/agent_room
+      RABBITMQ_URL: amqp://agent_room:${RABBITMQ_PASSWORD:-local-agent-room}@rabbitmq:5672/
+      GATEWAY_HTTP_ADDR: :8080
+      GATEWAY_ENV: ${GATEWAY_ENV:-development}
+      GATEWAY_API_KEY: ${GATEWAY_API_KEY:-}
+      GATEWAY_ALLOWED_ORIGINS: ${GATEWAY_ALLOWED_ORIGINS:-http://localhost:5173}
+      GATEWAY_RATE_PER_SECOND: ${GATEWAY_RATE_PER_SECOND:-20}
+      GATEWAY_RATE_BURST: ${GATEWAY_RATE_BURST:-40}
+      GATEWAY_MAX_TENANT_LIMITERS: ${GATEWAY_MAX_TENANT_LIMITERS:-10000}
+      GATEWAY_DB_MAX_CONNECTIONS: ${GATEWAY_DB_MAX_CONNECTIONS:-30}
+      GATEWAY_WORKSPACE: /data/workspace
+      GATEWAY_DEFAULT_TENANT: ${GATEWAY_DEFAULT_TENANT:-default}
+      GATEWAY_TRUST_TENANT_HEADER: ${GATEWAY_TRUST_TENANT_HEADER:-false}
+      GATEWAY_OIDC_ISSUER: ${GATEWAY_OIDC_ISSUER:-}
+      GATEWAY_OIDC_AUDIENCE: ${GATEWAY_OIDC_AUDIENCE:-}
+      GATEWAY_OIDC_TENANT_CLAIM: ${GATEWAY_OIDC_TENANT_CLAIM:-tenant_id}
+      GATEWAY_OIDC_ROLES_CLAIM: ${GATEWAY_OIDC_ROLES_CLAIM:-roles}
+      GATEWAY_CONFIG_ENCRYPTION_KEY: ${GATEWAY_CONFIG_ENCRYPTION_KEY:-}
+      GATEWAY_CONFIG_ENCRYPTION_KEY_ID: ${GATEWAY_CONFIG_ENCRYPTION_KEY_ID:-local-v1}
+      GATEWAY_ENABLE_EINO_RUNTIME: ${GATEWAY_ENABLE_EINO_RUNTIME:-false}
+      GATEWAY_GUARD_MODE: ${GATEWAY_GUARD_MODE:-warn}
+      GATEWAY_EMBEDDING_ALLOWED_HOSTS: ${GATEWAY_EMBEDDING_ALLOWED_HOSTS:-api.openai.com}
+      GATEWAY_WEBHOOK_ALLOWED_HOSTS: ${GATEWAY_WEBHOOK_ALLOWED_HOSTS:-open.feishu.cn}
+      REDIS_URL: redis://redis:6379/0
+      GATEWAY_CONFIG_CACHE_TTL: ${GATEWAY_CONFIG_CACHE_TTL:-30s}
+      GATEWAY_CONFIG_CACHE_LOCAL_LIMIT: ${GATEWAY_CONFIG_CACHE_LOCAL_LIMIT:-2048}
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres: { condition: service_healthy }
+      rabbitmq: { condition: service_healthy }
+      redis: { condition: service_healthy }
+      migrate: { condition: service_completed_successfully }
+    volumes:
+      - worker-workspace:/data/workspace:ro
+    restart: unless-stopped
+
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.worker
+    environment:
+      DATABASE_URL: postgresql://agent_room:${POSTGRES_PASSWORD:-local-agent-room}@postgres:5432/agent_room
+      RABBITMQ_URL: amqp://agent_room:${RABBITMQ_PASSWORD:-local-agent-room}@rabbitmq:5672/
+      AGENT_ROOM_DEFAULT_MODEL: ${AGENT_ROOM_DEFAULT_MODEL:-deepseek-v4-pro}
+      AGENT_ROOM_GRAPH: ${AGENT_ROOM_GRAPH:-full_react}
+      AGENT_ROOM_WORKSPACE: /data/workspace
+      # Production-safe defaults: no direct shell and human approval for every
+      # write/side-effecting tool call. Override only in a dedicated sandbox.
+      AGENT_ROOM_SHELL_ALLOWLIST: ${AGENT_ROOM_SHELL_ALLOWLIST:-}
+      AGENT_ROOM_TOOL_MODE: ${AGENT_ROOM_TOOL_MODE:-approval}
+      AGENT_ROOM_SANDBOX_RUNNER_URL: ${AGENT_ROOM_SANDBOX_RUNNER_URL:-}
+      AGENT_ROOM_SANDBOX_RUNNER_TOKEN: ${AGENT_ROOM_SANDBOX_RUNNER_TOKEN:-}
+      AGENT_ROOM_WORKER_CONCURRENCY: ${AGENT_ROOM_WORKER_CONCURRENCY:-4}
+      AGENT_ROOM_MEMORY: "0"
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      ANTHROPIC_BASE_URL: ${ANTHROPIC_BASE_URL:-}
+      ANTHROPIC_AUTH_TOKEN: ${ANTHROPIC_AUTH_TOKEN:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+    volumes:
+      - worker-workspace:/data/workspace
+    depends_on:
+      postgres: { condition: service_healthy }
+      rabbitmq: { condition: service_healthy }
+      migrate: { condition: service_completed_successfully }
+      gateway: { condition: service_started }
+    deploy:
+      replicas: ${WORKER_REPLICAS:-2}
+    restart: unless-stopped
+
+  eino-worker:
+    profiles: ["eino"]
+    build:
+      context: .
+      dockerfile: gateway/Dockerfile.eino-worker
+    environment:
+      DATABASE_URL: postgresql://agent_room:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}@postgres:5432/agent_room
+      RABBITMQ_URL: amqp://agent_room:${RABBITMQ_PASSWORD:?set RABBITMQ_PASSWORD}@rabbitmq:5672/
+      GATEWAY_ENV: production
+      GATEWAY_API_KEY: ${GATEWAY_API_KEY:?set GATEWAY_API_KEY}
+      GATEWAY_ENABLE_EINO_RUNTIME: "true"
+      GATEWAY_CONFIG_ENCRYPTION_KEY: ${GATEWAY_CONFIG_ENCRYPTION_KEY:?set GATEWAY_CONFIG_ENCRYPTION_KEY}
+      GATEWAY_CONFIG_ENCRYPTION_KEY_ID: ${GATEWAY_CONFIG_ENCRYPTION_KEY_ID:-local-v1}
+    depends_on:
+      postgres: { condition: service_healthy }
+      rabbitmq: { condition: service_healthy }
+      migrate: { condition: service_completed_successfully }
+    restart: unless-stopped
+
+  knowledge-worker:
+    build:
+      context: .
+      dockerfile: gateway/Dockerfile.knowledge-worker
+    environment:
+      DATABASE_URL: postgresql://agent_room:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}@postgres:5432/agent_room
+      RABBITMQ_URL: amqp://agent_room:${RABBITMQ_PASSWORD:?set RABBITMQ_PASSWORD}@rabbitmq:5672/
+      GATEWAY_ENV: production
+      GATEWAY_API_KEY: ${GATEWAY_API_KEY:?set GATEWAY_API_KEY}
+    depends_on:
+      postgres: { condition: service_healthy }
+      rabbitmq: { condition: service_healthy }
+      migrate: { condition: service_completed_successfully }
+    restart: unless-stopped
+
+  webhook-worker:
+    profiles: ["webhook"]
+    build:
+      context: .
+      dockerfile: gateway/Dockerfile.webhook-worker
+    environment:
+      DATABASE_URL: postgresql://agent_room:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}@postgres:5432/agent_room
+      GATEWAY_CONFIG_ENCRYPTION_KEY: ${GATEWAY_CONFIG_ENCRYPTION_KEY:?set GATEWAY_CONFIG_ENCRYPTION_KEY}
+      GATEWAY_DB_MAX_CONNECTIONS: ${WEBHOOK_WORKER_DB_MAX_CONNECTIONS:-10}
+      GATEWAY_WEBHOOK_ALLOWED_HOSTS: ${GATEWAY_WEBHOOK_ALLOWED_HOSTS:-open.feishu.cn}
+      WEBHOOK_WORKER_POLL: ${WEBHOOK_WORKER_POLL:-500ms}
+      WEBHOOK_WORKER_BATCH: ${WEBHOOK_WORKER_BATCH:-25}
+    depends_on:
+      postgres: { condition: service_healthy }
+      migrate: { condition: service_completed_successfully }
+    restart: unless-stopped
+
+volumes:
+  postgres-data:
+  rabbitmq-data:
+  redis-data:
+  worker-workspace:

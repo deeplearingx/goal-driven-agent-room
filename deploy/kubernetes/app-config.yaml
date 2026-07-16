@@ -1,0 +1,26 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: agent-room-config
+  namespace: agent-room
+data:
+  GATEWAY_ENV: production
+  GATEWAY_HTTP_ADDR: ":8080"
+  GATEWAY_ALLOWED_ORIGINS: https://app.example.com
+  GATEWAY_RATE_PER_SECOND: "100"
+  GATEWAY_RATE_BURST: "200"
+  GATEWAY_DB_MAX_CONNECTIONS: "30"
+  GATEWAY_DEFAULT_TENANT: default
+  GATEWAY_TRUST_TENANT_HEADER: "false"
+  GATEWAY_RETENTION: 720h
+  GATEWAY_CLEANUP_INTERVAL: 1h
+  AGENT_ROOM_GRAPH: full_react
+  AGENT_ROOM_WORKER_CONCURRENCY: "4"
+  AGENT_ROOM_WORKER_LEASE_SECONDS: "600"
+  AGENT_ROOM_MEMORY: "0"
+  AGENT_ROOM_WORKSPACE: /data/workspace
+  AGENT_ROOM_SHELL_ALLOWLIST: ""
+  AGENT_ROOM_ALLOW_DIRECT_SHELL: "0"
+  AGENT_ROOM_TOOL_MODE: approval
+  # Set only after deploying sandbox-runner on a dedicated isolated node/host.
+  AGENT_ROOM_SANDBOX_RUNNER_URL: ""

@@ -1,0 +1,23 @@
+# Apply this job once per release before updating application Deployments.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: agent-room-migrate-REPLACE_WITH_RELEASE
+  namespace: agent-room
+spec:
+  backoffLimit: 3
+  ttlSecondsAfterFinished: 86400
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: migrate
+          image: ghcr.io/your-org/agent-room-gateway:REPLACE_WITH_IMMUTABLE_TAG
+          envFrom:
+            - configMapRef: { name: agent-room-config }
+            - secretRef: { name: agent-room-secrets }
+          env:
+            - name: GATEWAY_AUTO_MIGRATE
+              value: "true"
+            - name: GATEWAY_MIGRATE_ONLY
+              value: "true"

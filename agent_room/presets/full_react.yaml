@@ -1,0 +1,41 @@
+# Full pipeline with a *tool-using* developer (ReAct loop).
+#
+# Same topology as `full`, but the developer node is granted the four built-in
+# tools so it can really discover files, read them, write a fix, and run a
+# shell command (pytest) before handing off to the reviewer. This is what makes
+# the pixel UI's tool badges ("跑命令 / 读文件 / 写文件 / 找文件") light up.
+#
+# SECURITY: this preset only declares *which* tools the developer may call.
+# The actual safety envelope is enforced by the registry the server builds
+# (see agent_room/server/react_runtime.py): fs tools are confined to a
+# workspace dir, `shell` is allowlisted (deny-by-default) and pinned to that
+# workspace with a timeout. `tool_mode: unrestricted` is required so write_text
+# and shell survive the permission filter — without it the developer could only
+# read. Switch the registry's allowlist to empty (or AGENT_ROOM_SHELL_ALLOWLIST="")
+# to drop `shell`; the server then also drops it from the tool list so spec and
+# registry stay consistent.
+#
+# `"on"` is quoted because PyYAML treats bare `on` as a YAML 1.1 boolean.
+name: full_react
+entry: planner
+nodes:
+  planner:
+    role: planner
+  developer:
+    role: developer
+    tools: [glob, read_text, write_text, shell]
+    tool_mode: unrestricted
+    max_dev_rounds: 8
+  reviewer:
+    role: reviewer
+  delivery:
+    role: delivery
+edges:
+  - { from: planner, to: developer }
+  - { from: developer, to: reviewer }
+  - from: reviewer
+    branches:
+      - { "on": developer, to: developer }
+      - { "on": delivery, to: delivery }
+      - { "on": halt, to: __end__ }
+  - { from: delivery, to: __end__ }

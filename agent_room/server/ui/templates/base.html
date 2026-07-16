@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}agent-room{% endblock %}</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --fg: #1a1a1a;
+      --muted: #6a6a6a;
+      --bg: #fafafa;
+      --card: #ffffff;
+      --border: #e2e2e2;
+      --accent: #2563eb;
+      --ok: #15803d;
+      --warn: #c2410c;
+      --bad: #b91c1c;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --fg: #e7e7e7;
+        --muted: #999;
+        --bg: #0f0f10;
+        --card: #1a1a1c;
+        --border: #2c2c2e;
+        --accent: #60a5fa;
+        --ok: #4ade80;
+        --warn: #fb923c;
+        --bad: #f87171;
+      }
+    }
+    body { font: 14px/1.5 system-ui, sans-serif; color: var(--fg); background: var(--bg); margin: 0; }
+    main { max-width: 920px; margin: 0 auto; padding: 24px; }
+    header { display: flex; align-items: baseline; gap: 16px; margin-bottom: 24px; }
+    header h1 { margin: 0; font-size: 18px; }
+    header a { color: var(--muted); text-decoration: none; }
+    header a:hover { color: var(--fg); }
+    .card { background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 16px; margin-bottom: 16px; }
+    .row { display: flex; gap: 12px; align-items: center; }
+    .col { display: flex; flex-direction: column; gap: 8px; }
+    label { font-size: 12px; color: var(--muted); }
+    input[type="text"], textarea { width: 100%; box-sizing: border-box; padding: 8px; font: inherit; color: var(--fg); background: var(--bg); border: 1px solid var(--border); border-radius: 4px; }
+    textarea { min-height: 90px; resize: vertical; }
+    button { padding: 8px 14px; font: inherit; color: white; background: var(--accent); border: 0; border-radius: 4px; cursor: pointer; }
+    button:disabled { opacity: 0.6; cursor: not-allowed; }
+    .pill { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 12px; }
+    .pill.running { background: rgba(96,165,250,.18); color: var(--accent); }
+    .pill.completed, .pill.review_passed { background: rgba(74,222,128,.18); color: var(--ok); }
+    .pill.failed, .pill.review_rejected { background: rgba(248,113,113,.18); color: var(--bad); }
+    .pill.awaiting_user, .pill.need_user_decision, .pill.revision_required { background: rgba(251,146,60,.18); color: var(--warn); }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { text-align: left; padding: 8px; border-bottom: 1px solid var(--border); font-weight: normal; }
+    th { color: var(--muted); font-size: 12px; }
+    .events { font-family: ui-monospace, SFMono-Regular, monospace; font-size: 12px; max-height: 320px; overflow-y: auto; }
+    .events .ev { padding: 4px 0; border-bottom: 1px dashed var(--border); }
+    .events .ev .name { color: var(--accent); }
+    .events .ev .meta { color: var(--muted); margin-left: 8px; }
+    pre { background: var(--bg); border: 1px solid var(--border); border-radius: 4px; padding: 12px; overflow-x: auto; font-size: 12px; }
+    a { color: var(--accent); }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <h1><a href="/ui" style="color: var(--fg)">agent-room</a></h1>
+      <a href="/docs">openapi</a>
+      <a href="/healthz">healthz</a>
+    </header>
+    {% block body %}{% endblock %}
+  </main>
+  <script src="/ui/static/app.js"></script>
+</body>
+</html>

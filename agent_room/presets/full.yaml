@@ -1,0 +1,30 @@
+# Full v0.1 pipeline: planner → developer → reviewer → (loop / delivery / halt)
+# This is the default produced by build_agent_room_graph for backward compat;
+# touching this YAML changes the production graph.
+#
+# Each role's HUMAN message already includes its standard sections (plan, code,
+# title, description, user_directives where relevant — see roles/*.py).
+# `extra_context_keys` is reserved for *additional* state fields beyond those
+# defaults; v0.2 doesn't need it on the built-in pipeline.
+#
+# `"on"` is quoted because PyYAML treats bare `on` as a YAML 1.1 boolean.
+name: full
+entry: planner
+nodes:
+  planner:
+    role: planner
+  developer:
+    role: developer
+  reviewer:
+    role: reviewer
+  delivery:
+    role: delivery
+edges:
+  - { from: planner, to: developer }
+  - { from: developer, to: reviewer }
+  - from: reviewer
+    branches:
+      - { "on": developer, to: developer }
+      - { "on": delivery, to: delivery }
+      - { "on": halt, to: __end__ }
+  - { from: delivery, to: __end__ }

@@ -1,0 +1,7 @@
+interface:
+  display_name: "Agent Room Interview Coach"
+  short_description: "用真实代码证据训练项目深挖、系统设计和模拟面试能力"
+  default_prompt: "Use $agent-room-interview-coach to prepare me step by step for an interview about this project."
+
+policy:
+  allow_implicit_invocation: true

@@ -1,0 +1,62 @@
+# Goal mode — the project's second operating mode (PLAN.md goal-mode section).
+#
+# workflow mode (`full_react`) runs the pipeline once and stops when the
+# revision budget runs out. Goal mode inverts that: the run keeps iterating
+# developer → verify until an OBJECTIVE oracle passes (TaskRequest's
+# `verify_command` exits 0), with the iteration ceiling demoted to a runaway
+# brake. Tasks without a verify_command fall back to the reviewer's
+# subjective `approved` — same review_router as everywhere else.
+#
+# Routing is deterministic end-to-end (static topology, dynamic trajectory —
+# see PLAN.md for the rationale). The one LLM judgment call in the loop is
+# the `supervisor` node, and even *it* is invoked by a deterministic rule:
+# every STUCK_EVERY consecutive verification failures, goal_router detours
+# there once so the LLM can pick a strategy (continue / replan / ask_user /
+# abort) instead of the loop mechanically hammering the developer forever.
+#
+# SECURITY: verify_command passes the same shell allowlist as the developer's
+# shell tool and runs pinned to the task workspace; verify_files are re-seeded
+# before every verification (anti-tamper). See SECURITY.md.
+#
+# `"on"` is quoted because PyYAML treats bare `on` as a YAML 1.1 boolean.
+name: goal
+entry: planner
+nodes:
+  planner:
+    role: planner
+  developer:
+    role: developer
+    tools: [glob, read_text, write_text, shell]
+    tool_mode: unrestricted
+    max_dev_rounds: 8
+  verify:
+    role: verifier
+  supervisor:
+    role: supervisor
+  reviewer:
+    role: reviewer
+  delivery:
+    role: delivery
+edges:
+  - { from: planner, to: developer }
+  - { from: developer, to: verify }
+  - from: verify
+    router: "agent_room.routers:goal_router"
+    branches:
+      - { "on": delivery, to: delivery }
+      - { "on": developer, to: developer }
+      - { "on": reviewer, to: reviewer }
+      - { "on": supervisor, to: supervisor }
+      - { "on": halt, to: __end__ }
+  - from: supervisor
+    router: "agent_room.routers:stuck_router"
+    branches:
+      - { "on": developer, to: developer }
+      - { "on": planner, to: planner }
+      - { "on": halt, to: __end__ }
+  - from: reviewer
+    branches:
+      - { "on": developer, to: developer }
+      - { "on": delivery, to: delivery }
+      - { "on": halt, to: __end__ }
+  - { from: delivery, to: __end__ }
