@@ -1,4 +1,8 @@
 FROM golang:1.25.0-alpine AS build
+ARG GOPROXY=https://goproxy.cn,direct
+ARG GOSUMDB=sum.golang.google.cn
+ENV GOPROXY=${GOPROXY} \
+    GOSUMDB=${GOSUMDB}
 WORKDIR /src
 COPY gateway/go.mod gateway/go.sum* ./
 RUN go mod download
