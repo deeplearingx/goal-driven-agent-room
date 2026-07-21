@@ -4,10 +4,115 @@
 [![coverage](https://img.shields.io/badge/coverage-93%25-brightgreen.svg)](#coverage)
 [![python](https://img.shields.io/badge/python-3.11%20%7C%203.12%20%7C%203.13-blue.svg)](pyproject.toml)
 
-A **multi-agent collaboration** system built on **LangGraph** — multiple
-specialized roles (planner → developer → reviewer → delivery) working a task
-together. Python rewrite of the TypeScript `agent-room` from `hermes-web-ui`,
-distilled into ~600 lines of code.
+A deployable **AI engineering workspace**: a Go admission Gateway and
+RabbitMQ absorb concurrent requests, while a Python LangGraph runtime drives
+planner → developer → reviewer → delivery. The React console streams the
+whole execution live and supports safe, approval-gated tool use.
+
+## 投递版 Demo / submission checklist
+
+This repository is prepared for the two delivery forms requested in the
+internship brief:
+
+- **Online AI Demo**: build and deploy the included Caddy overlay, then share
+  `https://<your-domain>/app/`. It gives one public URL for the React console,
+  SSE task stream and AI execution backend.
+- **GitHub repository**: push this branch to your own repository and replace
+  `<YOUR_GITHUB_REPOSITORY_URL>` in the deployment command. No fictional
+  public URL is claimed in this README; DNS/domain ownership is intentionally
+  left to the deployer.
+
+The exact DNS, HTTPS, secret and rollback commands are in
+[docs/demo-deployment.md](docs/demo-deployment.md). A local preflight is:
+
+```bash
+cp .env.demo.example .env.demo
+# fill provider key, passwords, domain and Caddy bcrypt hash
+docker compose --env-file .env.demo \
+  -f docker-compose.production.yml \
+  -f docker-compose.demo.yml config --quiet
+```
+
+## Architecture
+
+```text
+Browser / React console
+  │ HTTPS + Basic Auth + SSE
+  ▼
+Caddy Demo edge ───────────────────────────────────────────────────────┐
+  │ same-origin /tasks, /workspace, /api                                │
+  ▼                                                                       │
+Go Gateway ── one PostgreSQL transaction ── tasks + outbox + audit       │
+  │ publisher confirm                                                     │
+  ▼                                                                       │
+RabbitMQ quorum queues ──► Python LangGraph Workers ──► Model provider   │
+                                  │                 │                    │
+                                  │                 └─ tools / MCP       │
+                                  ▼                                      │
+                         PostgreSQL checkpoints + events ────────────────┘
+```
+
+The control plane is deliberately split from model execution: the Gateway
+handles authentication, tenant rate limits, idempotency, durable admission and
+replayable SSE; Workers handle slow model/tool work. If RabbitMQ is briefly
+unavailable, the transactional Outbox retries publishing instead of losing an
+accepted task. See [production architecture](docs/production-go-rabbitmq.md)
+for the queue, retry and scale rationale.
+
+## Key Prompt and Vibe design
+
+The product vibe is **a calm engineering control room, not a generic chat
+box**: users can see who is working, what tool was requested, reviewer
+feedback, token/cost events and the final delivery. The prompt design follows
+the same explicit, inspectable approach:
+
+1. **Identity** — the developer is told to produce idiomatic code and address
+   each reviewer issue.
+2. **Grounding** — when tools are available, it must inspect the workspace
+   rather than invent APIs.
+3. **Task context** — plan, task, user directives, reviewer feedback and
+   optional domain context are assembled as ordered layers.
+4. **Convergence** — a maximum ReAct round budget removes tools once exhausted
+   so the model must return a final answer rather than loop forever.
+
+The source of truth is
+[agent_room/prompt/developer.py](agent_room/prompt/developer.py), rather than
+an undocumented prompt pasted into a dashboard. Prompt versions, model
+profiles and runtime snapshots are immutable in the Go control plane, so a
+historical task can be reproduced with its original configuration.
+
+## AI execution: streaming and function calling
+
+The developer node uses LangChain tool binding / function calling. The model
+returns structured `tool_calls`; LangGraph's `ToolNode` validates arguments,
+executes the approved tool and appends a `ToolMessage` before the next model
+turn. Built-in filesystem, MCP, REST, A2A and remote sandbox adapters share a
+single policy boundary.
+
+```text
+LLM tool_call → policy (read-only / approval / unrestricted)
+              → human approval for side effects
+              → validated tool execution
+              → ToolMessage + guardrail scan
+              → next LLM turn or final answer
+```
+
+For safety, production defaults disable direct Shell, validate every
+tenant/task workspace segment, pin remote sandbox profiles to image digests,
+and serialize parallel tool calls so one approval authorizes exactly one
+operation. Details: [sandbox security](docs/sandbox-security.md).
+
+The browser receives native SSE from persisted task events, not polling:
+
+```bash
+curl -N -X POST http://localhost:8080/tasks/stream \
+  -H 'content-type: application/json' \
+  -d '{"title":"email validator","description":"write tests first"}'
+```
+
+Each event is persisted before delivery; `Last-Event-ID` reconnects without
+losing the trajectory. The UI therefore displays model token deltas, tool
+calls/results, approvals and final delivery in one timeline.
 
 > **Which kind of "multi-agent"?** The *centralized, controllable, evaluable*
 > kind: one tool-using autonomous agent (the developer's ReAct loop) plus three
@@ -22,7 +127,7 @@ distilled into ~600 lines of code.
 > 健壮性 bug，以及为什么）。
 >
 > **Project conventions**: see [CLAUDE.md](CLAUDE.md) (constitution),
-> [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) (layout),
+> [docs/architecture.md](docs/architecture.md) (layout),
 > [CONTRIBUTING.md](CONTRIBUTING.md) (workflow), and
 > [SECURITY.md](SECURITY.md) (security).
 > **Roadmap & ADR index**: see [PLAN.md](PLAN.md).

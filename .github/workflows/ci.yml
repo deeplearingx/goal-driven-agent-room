@@ -159,6 +159,7 @@ jobs:
       - run: docker build -f gateway/Dockerfile.webhook-worker -t agent-room-webhook-worker:ci .
       - run: docker build -f gateway/Dockerfile.sandbox-runner -t agent-room-sandbox-runner:ci .
       - run: docker build -f Dockerfile.worker -t agent-room-worker:ci .
+      - run: docker build -f Dockerfile.demo -t agent-room-demo:ci .
       - name: Scan Gateway image for high or critical vulnerabilities
         # Pinned commit: avoid mutable action tags in the supply chain.
         uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # v0.35.0
@@ -204,6 +205,14 @@ jobs:
         uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # v0.35.0
         with:
           image-ref: agent-room-sandbox-runner:ci
+          format: table
+          exit-code: '1'
+          ignore-unfixed: true
+          severity: CRITICAL,HIGH
+      - name: Scan public Demo edge image for high or critical vulnerabilities
+        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # v0.35.0
+        with:
+          image-ref: agent-room-demo:ci
           format: table
           exit-code: '1'
           ignore-unfixed: true

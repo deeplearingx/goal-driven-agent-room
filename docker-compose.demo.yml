@@ -1,0 +1,35 @@
+# Public, single-VM Demo overlay. Usage:
+# docker compose -f docker-compose.production.yml -f docker-compose.demo.yml up -d --build
+#
+# This is deliberately a small invitation-only showcase, not the multi-node
+# Kubernetes topology documented in deploy/kubernetes/.
+services:
+  # The base Compose file exposes :8080 for local development. A public Demo
+  # must expose only Caddy's TLS edge, never the unauthenticated raw Gateway.
+  gateway:
+    ports: !reset []
+
+  demo:
+    build:
+      context: .
+      dockerfile: Dockerfile.demo
+    environment:
+      ACME_EMAIL: ${ACME_EMAIL:?set ACME_EMAIL in .env.demo}
+      CADDY_SITE: ${CADDY_SITE:?set CADDY_SITE in .env.demo}
+      DEMO_BASIC_AUTH_USER: ${DEMO_BASIC_AUTH_USER:?set DEMO_BASIC_AUTH_USER in .env.demo}
+      DEMO_BASIC_AUTH_HASH: ${DEMO_BASIC_AUTH_HASH:?set DEMO_BASIC_AUTH_HASH in .env.demo}
+      GATEWAY_API_KEY: ${GATEWAY_API_KEY:?set GATEWAY_API_KEY in .env.demo}
+    ports:
+      - "80:80"
+      - "443:443"
+    depends_on:
+      gateway:
+        condition: service_started
+    volumes:
+      - caddy-data:/data
+      - caddy-config:/config
+    restart: unless-stopped
+
+volumes:
+  caddy-data:
+  caddy-config:

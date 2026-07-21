@@ -1,0 +1,57 @@
+{
+	# Used by Let's Encrypt for expiry notifications. Set it in .env.demo.
+	email {$ACME_EMAIL}
+}
+
+# CADDY_SITE is a bare public domain, for example demo.example.com. Caddy
+# obtains and renews the HTTPS certificate automatically after DNS points here.
+{$CADDY_SITE} {
+	encode zstd gzip
+	header {
+		-Server
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "no-referrer"
+	}
+
+	# route preserves this exact order. In particular, health probes bypass the
+	# browser login while every interactive route is protected before proxying.
+	route {
+		# Keep probe endpoints available to the host/load balancer without
+		# exposing the interactive application.
+		@health path /healthz /readyz
+		handle @health {
+			reverse_proxy gateway:8080
+		}
+
+		# A small public demo should be invite-only. This protects the browser
+		# and the Caddy proxy then injects the Gateway key server-side; it is
+		# never part of the Vite bundle.
+		basic_auth {
+			{$DEMO_BASIC_AUTH_USER} {$DEMO_BASIC_AUTH_HASH}
+		}
+
+		@backend path /api/* /tasks/* /workspace/*
+		handle @backend {
+			reverse_proxy gateway:8080 {
+				header_up Authorization "Bearer {$GATEWAY_API_KEY}"
+				flush_interval -1
+			}
+		}
+
+		@root path /
+		redir @root /app/ 302
+		@app_without_slash path /app
+		redir @app_without_slash /app/ 308
+
+		# Vite is built with /app/ as its public base. handle_path strips that
+		# prefix before resolving files and keeps SPA deep links on index.html.
+		handle_path /app/* {
+			root * /srv
+			try_files {path} /index.html
+			file_server
+		}
+
+		respond "not found" 404
+	}
+}

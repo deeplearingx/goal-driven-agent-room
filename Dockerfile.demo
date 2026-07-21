@@ -1,0 +1,12 @@
+# Build the React console once, then serve it with the same reverse proxy that
+# terminates TLS. The browser never receives provider or Gateway credentials.
+FROM node:22-alpine AS frontend-build
+WORKDIR /src
+COPY mulit_agent_web_ui/package.json mulit_agent_web_ui/package-lock.json ./
+RUN npm ci
+COPY mulit_agent_web_ui ./
+RUN npm run build
+
+FROM caddy:2.10.2-alpine
+COPY deploy/demo/Caddyfile /etc/caddy/Caddyfile
+COPY --from=frontend-build /src/dist /srv
