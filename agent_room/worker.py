@@ -172,7 +172,17 @@ class Worker:
         except RetryLater:
             await message.nack(requeue=True)
         except Exception as exc:
-            self.log.exception("worker.command_failed", task_id=task_id, error=str(exc))
+            # Do not emit a rich traceback here. Rich renders local variables by
+            # default, which can include Settings and provider credentials in a
+            # long-running worker. The task id, error class and bounded message
+            # remain sufficient for operations without exposing the process
+            # environment.
+            self.log.error(
+                "worker.command_failed",
+                task_id=task_id,
+                error_type=type(exc).__name__,
+                error=str(exc).replace("\n", " ")[:500],
+            )
             delivery_count = int((message.headers or {}).get("x-delivery-count", 0))
             if delivery_count < 4:
                 await self._release(message_id)

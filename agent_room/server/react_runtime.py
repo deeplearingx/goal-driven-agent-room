@@ -111,12 +111,15 @@ async def load_server_mcp_tools(settings: Settings) -> list[BaseTool]:
 def _available_tool_names(settings: Settings, mcp_tool_names: tuple[str, ...] = ()) -> set[str]:
     """Tool names the server registry will actually contain, given the envelope.
 
-    `shell` is present only when an allowlist is configured; `memory` only when
-    cross-session memory is enabled; the fs tools are always available; MCP tool
-    names are whatever `load_server_mcp_tools` discovered (empty if unconfigured).
+    `shell` is present only when both an allowlist and the explicit local
+    development escape hatch are configured.  A stale allowlist must never make
+    a credential-bearing worker execute a subprocess. `memory` is present only
+    when cross-session memory is enabled; the fs tools are always available; MCP
+    tool names are whatever `load_server_mcp_tools` discovered (empty if
+    unconfigured).
     """
     names = {"glob", "read_text", "write_text"}
-    if settings.shell_allowlist:
+    if settings.shell_allowlist and settings.allow_direct_shell:
         names.add("shell")
     if settings.memory_enabled:
         names.add("memory")
@@ -138,9 +141,11 @@ def build_server_registry(
     """Build a registry whose tools are confined to the workspace.
 
     Creates the workspace dir if absent (the fs tools require an existing root).
-    Shell is registered only when an allowlist is set, and is pinned to the
-    workspace cwd with a timeout. `memory_provider` (when given) registers the
-    `memory` tool against that exact instance so writes reach the bound provider.
+    Shell is registered only when an allowlist and the explicit local-development
+    escape hatch are set, and is pinned to the workspace cwd with a timeout.
+    A configured allowlist without that escape hatch is safely ignored rather
+    than failing each task. `memory_provider` (when given) registers the `memory`
+    tool against that exact instance so writes reach the bound provider.
     `workspace_override` roots the tools at a per-task subdir for isolation.
     `mcp_tools` (when given) registers each under the `"mcp"` toolset — they
     pass through the same `tool_mode` permission filter as builtin tools (an
@@ -148,11 +153,6 @@ def build_server_registry(
     write/exec tool, so `read_only` mode drops it, matching every other unknown
     tool — see `tools/policy.py::is_read_only`).
     """
-    if settings.shell_allowlist and not settings.allow_direct_shell:
-        raise ValueError(
-            "direct shell is disabled: clear AGENT_ROOM_SHELL_ALLOWLIST or set "
-            "AGENT_ROOM_ALLOW_DIRECT_SHELL=1 only in an isolated development environment"
-        )
     workspace = workspace_override or workspace_dir(settings)
     workspace.mkdir(parents=True, exist_ok=True)
 
@@ -160,8 +160,14 @@ def build_server_registry(
     register_builtin_tools(
         registry,
         fs_root=str(workspace),
-        # Empty tuple → None → ShellTool not registered (deny-by-default).
-        shell_allowlist=list(settings.shell_allowlist) or None,
+        # A configured allowlist alone never enables subprocesses. Direct shell
+        # execution is an explicit local-development escape hatch; production
+        # deployments should use sandbox_exec instead.
+        shell_allowlist=(
+            list(settings.shell_allowlist)
+            if settings.shell_allowlist and settings.allow_direct_shell
+            else None
+        ),
         shell_cwd=str(workspace),
         shell_timeout_s=SHELL_TIMEOUT_S,
         memory_provider=memory_provider,
@@ -228,7 +234,7 @@ def describe_tool_envelope(
         "graph_preset": settings.graph_preset,
         "workspace_dir": str(Path(settings.workspace_dir).resolve()),
         "tool_mode": settings.tool_mode,
-        "shell_enabled": bool(settings.shell_allowlist),
+        "shell_enabled": bool(settings.shell_allowlist and settings.allow_direct_shell),
         "direct_shell_escape_hatch": settings.allow_direct_shell,
         "shell_allowlist": list(settings.shell_allowlist),
         "shell_timeout_s": SHELL_TIMEOUT_S,

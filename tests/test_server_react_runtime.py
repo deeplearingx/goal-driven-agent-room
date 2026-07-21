@@ -135,6 +135,14 @@ def test_registry_omits_shell_without_allowlist(tmp_path: Path):
     assert sorted(reg.names()) == ["glob", "read_text", "write_text"]
 
 
+def test_registry_ignores_allowlist_without_direct_shell_escape_hatch(tmp_path: Path):
+    """Production workers fail closed if a stale shell allowlist is present."""
+    settings = _settings(tmp_path, shell_allowlist=("pytest",), allow_direct_shell=False)
+    reg = build_server_registry(settings)
+    assert "shell" not in reg.names()
+    assert "shell" not in build_server_spec(settings).nodes["developer"].tools
+
+
 def test_shell_cwd_pinned_to_workspace(tmp_path: Path):
     settings = _settings(
         tmp_path, shell_allowlist=("pytest",), allow_direct_shell=True
@@ -181,6 +189,14 @@ def test_describe_envelope_shell_disabled(tmp_path: Path):
     env = describe_tool_envelope(_settings(tmp_path, shell_allowlist=()))
     assert env["shell_enabled"] is False
     assert env["shell_allowlist"] == []
+
+
+def test_describe_envelope_does_not_advertise_disabled_direct_shell(tmp_path: Path):
+    env = describe_tool_envelope(
+        _settings(tmp_path, shell_allowlist=("pytest",), allow_direct_shell=False)
+    )
+    assert env["shell_enabled"] is False
+    assert env["shell_allowlist"] == ["pytest"]
 
 
 # --- cross-session memory enablement -------------------------------------
@@ -291,9 +307,9 @@ def test_mcp_tool_names_added_to_developer_spec(tmp_path: Path):
     assert dev.tool_mode == "read_only"
 
 
-def test_direct_shell_requires_explicit_escape_hatch(tmp_path: Path):
-    with pytest.raises(ValueError, match="direct shell is disabled"):
-        build_server_registry(_settings(tmp_path, shell_allowlist=("python",)))
+def test_direct_shell_allowlist_without_escape_hatch_fails_closed(tmp_path: Path):
+    reg = build_server_registry(_settings(tmp_path, shell_allowlist=("python",)))
+    assert "shell" not in reg.names()
 
 
 def test_no_mcp_tool_names_means_no_mcp_tools_in_spec(tmp_path: Path):
