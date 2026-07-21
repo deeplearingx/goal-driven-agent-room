@@ -6,8 +6,12 @@ COPY gateway/ .
 RUN CGO_ENABLED=0 go test -tags=eino ./internal/runtime && \
     go build -tags=eino -trimpath -ldflags="-s -w" -o /out/gateway ./cmd/gateway
 
-FROM gcr.io/distroless/static-debian12:nonroot
-COPY --from=build /out/gateway /gateway
-USER nonroot:nonroot
+# CGO is disabled above, so the gateway can run from scratch. Keep the CA
+# bundle for outbound HTTPS calls (for example, embedding/model providers)
+# without requiring a separate runtime image registry.
+FROM scratch
+COPY --from=build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
+COPY --from=build --chown=65532:65532 /out/gateway /gateway
+USER 65532:65532
 EXPOSE 8080
 ENTRYPOINT ["/gateway"]

@@ -5,7 +5,8 @@ RUN go mod download
 COPY gateway/ .
 RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/knowledge-worker ./cmd/knowledge-worker
 
-FROM gcr.io/distroless/static-debian12:nonroot
-COPY --from=build /out/knowledge-worker /knowledge-worker
-USER nonroot:nonroot
+FROM scratch
+COPY --from=build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
+COPY --from=build --chown=65532:65532 /out/knowledge-worker /knowledge-worker
+USER 65532:65532
 ENTRYPOINT ["/knowledge-worker"]
